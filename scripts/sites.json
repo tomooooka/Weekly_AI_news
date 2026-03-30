@@ -1,0 +1,39 @@
+{
+  "sites": [
+    {
+      "name": "Claude Code Changelog",
+      "url": "https://docs.anthropic.com/en/release-notes/claude-code",
+      "selector": "article, .changelog-entry, h2, h3, li"
+    },
+    {
+      "name": "Anthropic Blog",
+      "url": "https://www.anthropic.com/blog",
+      "selector": "article, .blog-post, h2, h3, a[href*='/blog/']"
+    },
+    {
+      "name": "Cursor Changelog",
+      "url": "https://www.cursor.com/changelog",
+      "selector": "article, .changelog-entry, h2, h3, li"
+    },
+    {
+      "name": "Devin Release Notes",
+      "url": "https://app.devin.ai/release-notes",
+      "selector": "article, .release-note, h2, h3, li"
+    },
+    {
+      "name": "Google DeepMind Blog",
+      "url": "https://deepmind.google/discover/blog",
+      "selector": "article, .blog-post, h2, h3, a[href*='/blog/']"
+    },
+    {
+      "name": "Mistral Blog",
+      "url": "https://mistral.ai/news",
+      "selector": "article, .news-item, h2, h3, a[href*='/news/']"
+    },
+    {
+      "name": "OpenAI Blog",
+      "url": "https://openai.com/news",
+      "selector": "article, .news-item, h2, h3, a[href*='/blog/']"
+    }
+  ]
+}
