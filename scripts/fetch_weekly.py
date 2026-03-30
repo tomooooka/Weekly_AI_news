@@ -6,6 +6,7 @@ Weekly AI News Fetcher
 """
 
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone, timedelta
@@ -14,6 +15,7 @@ from urllib.parse import urljoin
 
 import anthropic
 import requests
+import tweepy
 from bs4 import BeautifulSoup
 
 # ── 定数 ──────────────────────────────────────────────────────────────
@@ -40,6 +42,19 @@ HEADERS = {
         "+https://github.com/tomooooka/Weekly_AI_news)"
     )
 }
+
+# X（Twitter）取得対象アカウント（@なし）
+X_ACCOUNTS = [
+    "claudeai",
+    "NotebookLM",
+    "GoogleLabs",
+    "GoogleAI",
+    "OpenAI",
+    "sama",
+    "perplexity_ai",
+    "genspark_japan",
+    "n8n_io",
+]
 
 
 # ── ユーティリティ ─────────────────────────────────────────────────────
@@ -98,9 +113,66 @@ def fetch_site(site: dict) -> list[dict]:
     return entries
 
 
+# ── X（Twitter）取得 ─────────────────────────────────────────────────────
+def fetch_x_tweets() -> list[dict]:
+    """X API v2でアカウントごとの先週ツイートを取得する。
+    X_BEARER_TOKEN が未設定の場合はスキップして空リストを返す。
+    """
+    bearer_token = os.environ.get("X_BEARER_TOKEN", "")
+    if not bearer_token:
+        print("X_BEARER_TOKEN not set, skipping X fetch.")
+        return []
+
+    client = tweepy.Client(bearer_token=bearer_token, wait_on_rate_limit=True)
+
+    # 期間をRFC3339(UTC)に変換
+    start_time = datetime(
+        LAST_MONDAY.year, LAST_MONDAY.month, LAST_MONDAY.day,
+        tzinfo=timezone.utc,
+    )
+    end_time = datetime(
+        LAST_SUNDAY.year, LAST_SUNDAY.month, LAST_SUNDAY.day,
+        23, 59, 59, tzinfo=timezone.utc,
+    )
+
+    results: list[dict] = []
+
+    for username in X_ACCOUNTS:
+        print(f"Fetching X: @{username}")
+        try:
+            user_resp = client.get_user(username=username, user_fields=["id"])
+            if not user_resp.data:
+                print(f"  User not found: @{username}", file=sys.stderr)
+                continue
+            user_id = user_resp.data.id
+
+            tweets_resp = client.get_users_tweets(
+                id=user_id,
+                start_time=start_time,
+                end_time=end_time,
+                max_results=20,
+                tweet_fields=["created_at", "text"],
+                exclude=["retweets", "replies"],
+            )
+            tweets = tweets_resp.data or []
+            print(f"  -> {len(tweets)} tweets")
+
+            for tw in tweets:
+                results.append({
+                    "account": username,
+                    "text": tw.text,
+                    "url": f"https://x.com/{username}/status/{tw.id}",
+                })
+        except tweepy.TweepyException as e:
+            print(f"  ERROR @{username}: {e}", file=sys.stderr)
+
+    return results
+
+
 # ── 記事生成 ────────────────────────────────────────────────────────────
 def generate_weekly_article(
     all_site_data: list[dict],
+    x_tweets: list[dict],
     rules_text: str,
     week_label: str,
     date_from: str,
@@ -127,7 +199,23 @@ def generate_weekly_article(
 
     raw_data = "\n\n".join(site_blocks)
 
+    # Xツイートのテキスト化
+    x_block = ""
+    if x_tweets:
+        x_lines = []
+        for tw in x_tweets:
+            x_lines.append(
+                f"- @{tw['account']}: {tw['text'][:280]}\n  URL: {tw['url']}"
+            )
+        x_block = "\n\n### X（Twitter）注目ツイート\n" + "\n".join(x_lines)
+
     title = f"週刊AIニュース {week_label}週"
+
+    x_section_instruction = (
+        "- 収集データの末尾にXツイートがある場合は「## X注目ツイート」セクションを追加し、"
+        "アカウントごとにまとめて日本語で要約する（ツイートURLリンクを付ける）"
+        if x_tweets else ""
+    )
 
     prompt = f"""以下の収集データをもとに、日本語の週刊AIニュースまとめ記事をMarkdown形式で生成してください。
 
@@ -142,12 +230,13 @@ def generate_weekly_article(
 - URLがない場合はサイトのトップURLをリンク先にする
 - リストやテーブルを適宜使って読みやすくする
 - 全文ですます調厳守
-- 文字数: 2000〜4000字
+- 文字数: 2000〜5000字
 - 冒頭にその週の要約（3〜5文）を入れる
 - 情報が少ないサイトは「今週の更新はありませんでした」と記載する
+{x_section_instruction}
 
 ## 収集データ（{date_from} 〜 {date_to}）
-{raw_data}
+{raw_data}{x_block}
 
 ## 出力形式
 以下のMarkdown構造のみを出力してください（説明文・コードブロック記号は不要）：
@@ -165,6 +254,8 @@ description: （ディスクリプション：150字以内・結論ベース）
 ---
 
 （サイトごとのH2セクション、ニュース一覧、ソースURLリンク）
+
+（Xツイートがある場合は「## X注目ツイート」セクション）
 
 ---
 
@@ -226,9 +317,13 @@ def main() -> None:
         entries = fetch_site(site)
         all_site_data.append({"name": site["name"], "entries": entries})
 
+    # Xツイートを取得
+    x_tweets = fetch_x_tweets()
+
     # 週刊記事を一括生成
     article = generate_weekly_article(
         all_site_data=all_site_data,
+        x_tweets=x_tweets,
         rules_text=rules_text,
         week_label=WEEK_LABEL,
         date_from=LAST_MONDAY.strftime("%Y-%m-%d"),
